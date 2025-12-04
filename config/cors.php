@@ -5,7 +5,7 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['http://next.shop.test:3000'],
+    'allowed_origins' => ['http://next.shop.test:3000', 'https://raylin.ir'],
 
     'allowed_headers' => ['*'],
 

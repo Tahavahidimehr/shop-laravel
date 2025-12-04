@@ -21,4 +21,9 @@ class Transaction extends Model
         'paid_at' => 'datetime',
         'status' => 'string',
     ];
+
+    public function order()
+    {
+        return $this->belongsTo(Order::class);
+    }
 }

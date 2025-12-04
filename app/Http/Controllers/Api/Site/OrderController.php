@@ -148,7 +148,7 @@ class OrderController extends Controller
                 }
 
                 // 📌 Job برای لغو اتوماتیک
-                CancelUnpaidOrder::dispatch($order)->delay(now()->addMinutes(15));
+                CancelUnpaidOrder::dispatch($order->id)->delay(now()->addMinutes(15));
 
                 return $this->successResponse(
                     $order->load('items'),
@@ -165,5 +165,132 @@ class OrderController extends Controller
                 500
             );
         }
+    }
+
+    public function pay(Order $order)
+    {
+        if ($order->user_id !== auth()->id()) {
+            return $this->errorResponse("این سفارش برای شما نیست!", null, 403);
+        }
+
+        if ($order->status !== 'pending') {
+            return $this->errorResponse("این سفارش قابل پرداخت نیست!", null, 422);
+        }
+
+        // 🔹 ساخت تراکنش
+        $transaction = $order->transactions()->create([
+            'user_id' => auth()->id(),
+            'payment_method_name' => 'zibal',
+            'price_to_pay' => $order->price_to_pay,
+            'order_code' => $order->order_code,
+        ]);
+
+        // 🔹 درخواست به زیبال
+        $payload = [
+            'merchant' => config('services.zibal.merchant'),
+            'amount' => $order->price_to_pay,
+            'orderId' => $order->order_code,
+            'callbackUrl' => route('payment.zibal.callback'),
+        ];
+
+        $response = \Http::post('https://gateway.zibal.ir/v1/request', $payload)->json();
+
+        if (($response['result'] ?? 0) != 100) {
+            $transaction->update([
+                'status' => 'failed',
+                'error_message' => $response['message'] ?? 'خطا در ایجاد پرداخت',
+            ]);
+            return $this->errorResponse("خطا در ایجاد تراکنش زیبال", $response, 500);
+        }
+
+        // 🔹 ذخیره trackId
+        $transaction->update([
+            'track_id' => $response['trackId']
+        ]);
+
+        // لینک پرداخت
+        $paymentUrl = "https://gateway.zibal.ir/start/" . $response['trackId'];
+
+        return $this->successResponse([
+            'payment_url' => $paymentUrl,
+            'transaction_id' => $transaction->id,
+        ], "لینک پرداخت ایجاد شد");
+    }
+
+    public function callback(Request $request)
+    {
+        $trackId = $request->trackId;
+
+        if (!$trackId) {
+            return view('payment.result', [
+                'success' => false,
+                'message' => 'شناسه تراکنش ارسال نشده است.'
+            ]);
+        }
+
+        $transaction = \App\Models\Transaction::where('track_id', $trackId)->first();
+
+        if (!$transaction) {
+            return view('payment.result', [
+                'success' => false,
+                'message' => 'تراکنش یافت نشد.'
+            ]);
+        }
+
+        $order = $transaction->order;
+
+        // 🔹 Verify از زیبال
+        $verify = \Http::post('https://gateway.zibal.ir/v1/verify', [
+            'merchant' => config('services.zibal.merchant'),
+            'trackId' => $trackId
+        ])->json();
+
+        $transaction->update(['verify_response' => $verify]);
+
+        if (($verify['result'] ?? 0) == 100) {
+
+            $transaction->update([
+                'status' => 'success',
+                'reference_id' => $verify['refNumber'],
+                'card_number' => $verify['cardNumber'] ?? null,
+                'paid_at' => now(),
+            ]);
+
+            $order->update([
+                'status' => 'paid',
+                'paid_at' => now(),
+            ]);
+
+            // 🔐 تولید token رمزنگاری‌شده
+            $token = encrypt([
+                'order_code' => $order->order_code,
+                'transaction_id' => $transaction->id,
+            ]);
+
+            return view('payment.result', [
+                'success' => true,
+                'ref' => $verify['refNumber'],
+                'orderCode' => $order->order_code,
+                'token' => $token,
+            ]);
+        }
+
+        // ❌ پرداخت ناموفق
+        $transaction->update([
+            'status' => 'failed',
+        ]);
+
+        $order->update(['status' => 'failed']);
+
+        $token = encrypt([
+            'order_code' => $order->order_code,
+            'transaction_id' => $transaction->id,
+        ]);
+
+        return view('payment.result', [
+            'success' => false,
+            'message' => 'پرداخت موفقیت‌آمیز نبود.',
+            'token' => $token,
+        ]);
     }
 }

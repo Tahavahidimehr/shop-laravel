@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Admin\ProductVariantController;
 use App\Http\Controllers\Api\Admin\VariantController;
 use App\Http\Controllers\Api\Admin\VariantValueController;
 use App\Http\Controllers\Api\Site\HomeController;
+use App\Http\Controllers\Api\Site\OrderController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/home', [HomeController::class, 'index']);
@@ -28,6 +29,8 @@ Route::group(['middleware' => 'auth:sanctum'], function () {
     Route::prefix('site')->group(function () {
         Route::get('/shipping_methods', [\App\Http\Controllers\Api\Site\ShippingMethodController::class, 'index']);
         Route::get('/addresses', [\App\Http\Controllers\Api\Site\AddressController::class, 'index']);
+        Route::post('/orders', [OrderController::class, 'store']);
+        Route::post('/orders/{order}/pay', [OrderController::class, 'pay']);
     });
 
     Route::get('/auth/user', [AuthController::class, 'user']);

@@ -12,6 +12,8 @@ class InventoryStock extends Model
     /** @use HasFactory<\Database\Factories\InventoryStockFactory> */
     use HasFactory;
 
+    protected $guarded = [];
+
     protected $casts = [
         'quantity' => 'integer',
         'average_cost' => 'integer',
